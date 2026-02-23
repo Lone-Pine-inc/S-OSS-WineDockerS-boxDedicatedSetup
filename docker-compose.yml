@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+    sbox_server:
+        build:
+            context: .
+            dockerfile: ./images/latest/Dockerfile
+        ports:
+            - "27015:27015"
+            - "27016:27016"
+        env_file:
+            - .env
+        volumes:
+            - /media/sbox-linux-server:/home/sboxserver
+        restart: unless-stopped
