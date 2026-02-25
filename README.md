@@ -1,4 +1,3 @@
-переведи на английский точно и отдай мне отделным файлом markdown 
 # s&box Dedicated Server — Docker (Wine/Linux)
 
 Run an [s&box](https://sbox.game) dedicated server on Linux using Docker and Wine. The server binary is a native Windows executable distributed by Facepunch via Steam; this setup wraps it in a Wine environment so it runs on any Linux host without a Windows machine.
