@@ -4,10 +4,14 @@ services:
             context: .
             dockerfile: ./images/latest/Dockerfile
         ports:
-            - "27015:27015"
-            - "27016:27016"
+            - "27015:27015/udp"
+            - "27015:27015/tcp"
+            - "27016:27016/udp"
+            - "27016:27016/tcp"
         env_file:
             - .env
         volumes:
             - /media/sbox-linux-server:/home/sboxserver
+        stdin_open: true
+        tty: true
         restart: unless-stopped

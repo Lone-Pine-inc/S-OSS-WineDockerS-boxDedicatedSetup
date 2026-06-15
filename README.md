@@ -1,18 +1,20 @@
-# s&box Dedicated Server — Docker (Wine/Linux)
+# s&box Dedicated Server — Docker (Native Linux)
 
-Run an [s&box](https://sbox.game) dedicated server on Linux using Docker and Wine. The server binary is a native Windows executable distributed by Facepunch via Steam; this setup wraps it in a Wine environment so it runs on any Linux host without a Windows machine.
+Run an [s&box](https://sbox.game) dedicated server on Linux using Docker. This setup runs the **native Linux** server build (`sbox-server.dll`) directly under the .NET 10 runtime — no Wine, no Xvfb, no Windows emulation. The server files are pulled anonymously from Steam with SteamCMD.
 
 [На русском можно прочитать здесь](https://github.com/Lone-Pine-inc/S-OSS-WineDockerS-boxDedicatedSetup/blob/main/README_ru.md)
+
 ---
 
 ## Overview
 
 [s&box](https://sbox.game) is a game creation platform developed by Facepunch Studios. It allows developers to build and publish entirely custom games — with their own rules, assets, and UX — using C# and a built-in scene editor. Players can hop between community-made games without ever leaving the platform. Dedicated servers are hosted per-game and are used to run persistent multiplayer sessions.
 
-- **Engine:**
 - **Scripting:** C# (.NET 10)
-- **Server binary:** `sbox-server.exe` (Windows PE, Steam App ID `1892930`)
-- **Default ports:** `27015` (game), `27016` (RCON/query)
+- **Server binary:** `sbox-server.dll` (native Linux, Steam App ID `1892930`)
+- **Default ports:** `27015` (game), `27016` (query)
+
+> Native Linux dedicated servers are **experimental** and not officially supported by Facepunch — they may break with any game update.
 
 ---
 
@@ -21,13 +23,15 @@ Run an [s&box](https://sbox.game) dedicated server on Linux using Docker and Win
 | Layer | Technology |
 |---|---|
 | Base image | `ubuntu:noble` |
-| Windows compatibility | Wine 64-bit + Wine 32-bit (i386) |
-| Virtual display | Xvfb (required by Wine) |
-| .NET runtime | .NET 10 via `winetricks` (bundled offline) |
-| Server download | SteamCMD (anonymous login, App ID `1892930`) |
-| Server launch | `wine sbox-server.exe` with env-supplied arguments |
+| Runtime | .NET 10 Runtime (installed via `dotnet-install.sh`) |
+| Native libs | `libgdiplus`, `lib32gcc-s1`, `lib32stdc++6`, `libicu74` |
+| Server download | SteamCMD (anonymous login, App ID `1892930`, **Linux** build) |
+| Server launch | `dotnet sbox-server.dll` with env-supplied arguments |
+| Init / signals | `tini` (clean SIGINT/SIGTERM handling) |
 
-On every container start, SteamCMD verifies and updates the server installation before Wine launches the executable. This ensures the server is always up to date.
+On every container start, SteamCMD verifies and updates the server installation (unless `SBOX_AUTO_UPDATE=0`), then `dotnet` launches `sbox-server.dll`. The server's bundled libraries in `bin/linuxsteamrt64` are added to `LD_LIBRARY_PATH` automatically.
+
+> Unlike the previous Wine-based setup, the server is **not** forced to the Windows platform in SteamCMD (`+@sSteamCmdForcePlatformType windows` is gone), so the native Linux build is downloaded.
 
 ---
 
@@ -35,7 +39,7 @@ On every container start, SteamCMD verifies and updates the server installation 
 
 - **Docker** ≥ 24
 - **Docker Compose** ≥ 2
-- A Linux host with at least **4 GB RAM** and **10 GB free disk** (for the server files)
+- A Linux host (x86-64) with at least **4 GB RAM** and **10 GB free disk** (for the server files)
 - A Steam-published s&box game (org + gamemode identifier)
 
 ---
@@ -58,8 +62,8 @@ cp .env.example .env
 Open `.env` and fill in your values:
 
 ```env
-SERVER_GAME_ARG=orgname.gamemodename
-SERVER_MAP_ARG=orgname.mapname
+SERVER_GAME_ARG=facepunch.sandbox
+SERVER_MAP_ARG=
 SERVER_HOSTNAME_ARG=My Dedicated Server
 SERVER_MOTD_ARG=Welcome!
 SERVER_ADDITIONAL_ARGS=
@@ -67,7 +71,7 @@ SERVER_ADDITIONAL_ARGS=
 
 | Variable | Description | Example |
 |---|---|---|
-| `SERVER_GAME_ARG` | The game to run — required | `facepunch.walker` |
+| `SERVER_GAME_ARG` | The game to run — required | `facepunch.sandbox` |
 | `SERVER_MAP_ARG` | Starting map — optional | `garry.scenemap` |
 | `SERVER_HOSTNAME_ARG` | Server name shown in the browser | `My Dedicated Server` |
 | `SERVER_MOTD_ARG` | Message of the Day shown on join | `Welcome!` |
@@ -103,7 +107,7 @@ docker compose up --build -d
 | Port | Protocol | Purpose |
 |---|---|---|
 | `27015` | UDP/TCP | Game traffic |
-| `27016` | UDP/TCP | Query / RCON |
+| `27016` | UDP/TCP | Query |
 
 Open both ports in your firewall/security group if you want the server to be publicly accessible.
 
@@ -111,7 +115,7 @@ Open both ports in your firewall/security group if you want the server to be pub
 
 ## Updating the Server
 
-SteamCMD validates and pulls the latest server build on every container restart. To force a full rebuild of the image (e.g., after a Dockerfile change):
+SteamCMD validates and pulls the latest server build on every container restart (controlled by `SBOX_AUTO_UPDATE`, default `1`). To force a full rebuild of the image (e.g., after a Dockerfile change):
 
 ```bash
 docker compose down
@@ -124,14 +128,12 @@ docker compose up --build
 
 ```
 .
-├── cache/
-│   └── dotnet10/                  # Offline .NET 10 installer (winetricks cache)
 ├── images/
-│   └── latest/
-│       ├── Dockerfile             # Main image definition
-│       └── winetricks             # Patched winetricks with .NET 10 support
-├── .env.example                   # Environment variable template
-├── docker-compose.yml             # Compose service definition
+│   └── latest/
+│       ├── Dockerfile             # Native Linux image (.NET 10 + SteamCMD)
+│       └── entrypoint.sh          # Update + launch script (dotnet sbox-server.dll)
+├── .env.example                   # Environment variable template
+├── docker-compose.yml             # Compose service definition
 └── README.md
 ```
 
@@ -139,24 +141,27 @@ docker compose up --build
 
 ## Troubleshooting
 
+**The server appears stuck on first boot**
+Normal — assets are being downloaded. The initial startup can take a while; watch network activity to confirm progress.
+
 **The server crashes on first boot**
 Steam may time out while downloading large server files. Restart the container — SteamCMD will resume the download:
 ```bash
 docker compose restart
 ```
 
-**Wine errors in the log**
-Wine occasionally prints non-fatal fixme/err messages. As long as the server process stays alive and players can connect, these can be ignored.
+**`ArgumentOutOfRangeException` / console width errors**
+The entrypoint sets a TTY size and the compose file enables `tty: true` to avoid this. If you run the image manually, pass `-it`.
 
 **Port already in use**
 Change the host-side port mappings in `docker-compose.yml`:
 ```yaml
 ports:
-  - "27020:27015"
-  - "27021:27016"
+  - "27020:27015/udp"
+  - "27020:27015/tcp"
+  - "27021:27016/udp"
+  - "27021:27016/tcp"
 ```
-
----
 
 ---
 
